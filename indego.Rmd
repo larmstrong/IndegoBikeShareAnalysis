@@ -45,8 +45,7 @@ dplyr              | Dataframe management utilities.
 e1071              | Various machine learning models. (SVM)
 forcats            | Factor processing tools.
 fst                | Fast serialization of data.
-geojsonR           | Management of GeoJSON documents.
-ggmap              | Map and geography-based plotting.
+
 geojsonR           | Processing of GeoJSON documents.
 ggplot2            | Plotting and graphing capabilities.
 here               | Current location management
@@ -78,7 +77,6 @@ library(e1071)
 library(forcats)
 library(fst)
 library(geojsonR)
-library(ggmap)
 library(ggplot2)
 library(here)
 library(jsonlite)
@@ -117,8 +115,8 @@ data_subdir <- "indego"
 # pre-serialized .fst file.
 
 # Indicate whether the tripdata_source should come from a .fst file or a .csv file.
-#tripdata_source <- "fst"
-tripdata_source <- "csv"
+tripdata_source <- "fst"
+#tripdata_source <- "csv"
 
 # Indicate whether the stationdata_source should come from a .fst file or a .json file.
 #stationdata_source <- "fst"
