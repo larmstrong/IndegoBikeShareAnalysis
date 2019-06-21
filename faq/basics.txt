@@ -1,0 +1,45 @@
+Indego Basics
+What is Indego?
+
+Indego is Philadelphia’s bike share program. Over a thousand bikes are available at stations around the city! Check our app or online station map for station locations as well as bike and dock availability.
+How do I get a bike?
+
+To check out a bike, you can purchase a pass online (credit card and cash options available) or simply walk up to any kiosk and use your credit card or debit card to pay for a Day Pass.
+
+Passholders with an Indego key can use it to check out a bike! Simply tap and release the silver button on the dock. The lights on the dock will illuminate. Once the lights go out, hold your key up to the key reader on the dock. The dock will beep and flash green. This means you can pull the bike out of the dock.
+
+If you have purchased a Day Pass at the kiosk or do not have an Indego key, follow the prompts on the screen to check out a bike:
+
+Tap the kiosk screen, then select “Start”. On the next screen select “Check out bike”, then “I have a pass”. The screen will ask for the nine-digit phone number associated with your pass. After entering it, select “Next”. You will receive a text message with your one-time password. Enter the six-digit code from the text message then select the bike you want to check out! The dock will beep and flash green. This means you can pull the bike out of the dock.
+How do I return a bike?
+
+After riding, return the bike to any Indego station and firmly push it into a dock. Three beeps will let you know your ride is complete! You will receive a text message confirming your ride is complete, unless you have opted out of text messaging. Properly docking the bike ends your trip. That’s it, you’re done!  
+
+Not sure where to find a station to return your bike? Check our app or online station map for station locations as well as bike and dock availability. 
+Is Indego a public program or a private company?
+
+Indego is a public program that is owned and managed by the City of Philadelphia. It is maintained and operated by local company Bicycle Transit Systems. All revenue supports Indego operations and expansion.
+How old do I have to be to ride?
+
+Riders need to be at least 14 years old to use Indego bikes. Minors need to be accompanied by a parent or guardian at least 18 years old during the ride.
+Do the bikes fit everyone?
+
+Indego bicycles are designed to be easy to ride. They have: step-through frames, pedal-powered front and rear lights, baskets, three speeds, and comfortable, easily adjustable seats to fit heights 5′ to 6′ 5”.
+How do I adjust the seat?
+
+There is a lever where the seat post meets the frame of the bicycle. Open this lever to freely move the seat post up or down to your desired height. Firmly push the lever back into the closed position before beginning your ride. 
+How do the lights on the bike turn on and off?
+
+The front and rear facing lights are powered by the rotation of the wheels. Start pedaling and the lights will turn on automatically. They’ll turn off shortly after you stop riding. 
+I’ve seen different colored lights on the dock when I check out a bike. What do they mean?
+
+Green: Indicates the bike has just been successfully checked out. The light will blink green and make a beeping noise to let you know you can remove the bike from the dock. 
+
+Yellow: Indicates that the station is presently connecting to our system to gather info regarding your pass and account status. 
+
+Orange: Indicates there may be an issue with your account, such as an expired pass or that your last bike is still checked out. Please contact our customer service team at 844-446-3346 for assistance. 
+
+Red: Indicates the bike is not presently available for checkout, generally due to a maintenance need.  
+Can I take out more than one bike at a time?
+
+Each pass type allows you to check out one bike at a time. To have multiple bikes out at once you will need a separate pass for each. You can check out up to four bikes with a single credit card or debit card by purchasing four separate Day Passes at a kiosk or by signing up for multiple accounts online. 

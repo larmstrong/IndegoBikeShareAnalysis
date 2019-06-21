@@ -1,0 +1,1559 @@
+---
+title: "Indigo Bike Share 2018"
+author: "Leonard Armstrong"
+date: "2/15/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# CLEAN START
+
+Create a clean start anytime the script is executed from the top.
+
+```{r clean_start}
+
+##-------------------------------------------------------------------------------------------------
+## CLEAN START
+
+# Remove any non-default packages
+default_packages <- union(getOption("defaultPackages"), "base")
+loaded_packages <- .packages()
+extra_packages <- setdiff(x = loaded_packages, y = default_packages)
+invisible(
+  sapply(
+    X = extra_packages, 
+    FUN = function(x) detach(name = paste("package:", x, sep=""), character.only = TRUE)))
+
+# Remove all variables and functions from the global environment
+rm(list = ls())
+
+```
+
+# LOAD LIBRARIES
+
+Load all libraries required for this script
+
+Library            | Purpose
+------------------ | ----------------------------------------------------------------
+arules             | Association rules utilities.
+assertthat         | Using associations to protect code.
+colorRamps         | Color gradients.
+dplyr              | Dataframe management utilities.
+e1071              | Various machine learning models. (SVM)
+forcats            | Factor processing tools.
+fst                | Fast serialization of data.
+geojsonR           | Management of GeoJSON documents.
+ggmap              | Map and geography-based plotting.
+geojsonR           | Processing of GeoJSON documents.
+ggplot2            | Plotting and graphing capabilities.
+here               | Current location management
+leaflet            | Interactive mapping functionality
+leaflet.minicharts | Charting capabilities on top of Leaflet maps.
+lubridate          | Data/time management utilities
+plot3D             | 3-dimensional plotting functions.
+qcc                | Pareto charting
+randomForest       | Random forest analysis functions
+rattle             | Clean decision tree graphing.
+reshape2           | Data shaping utilities. (E.g., melt)
+rpart              | Decision tree models.
+stats              | Hclust function
+stringi            | String manipulation functions.
+stringr            | String manipulation functions.
+tm                 | Text mining capabilities.
+wordcloud2         | Wordcloud generation functions.
+
+```{r load_libraries}
+
+##-------------------------------------------------------------------------------------------------
+## LOAD LIBRARIES 
+## All required libraries to execute this script are included here, at the top of the script. 
+
+library(arules)
+library(assertthat)
+library(dplyr)
+library(e1071)
+library(forcats)
+library(fst)
+library(geojsonR)
+library(ggmap)
+library(ggplot2)
+library(here)
+library(jsonlite)
+library(leaflet)
+library(leaflet.minicharts)
+library(lubridate)
+library(philentropy)
+library(plot3D)
+library(qcc)
+library(randomForest)
+library(rattle)
+library(RColorBrewer)
+library(reshape2)
+library(rpart)
+library(stats)
+library(stringi)
+library(stringr)
+library(tm)
+library(wordcloud2)
+```
+
+# INITIALIZE
+
+```{r initialize}
+
+##-------------------------------------------------------------------------------------------------
+## INITIALIZE
+## The Initialize section sets up some key processing variable that later parts of the code need.
+
+# Define current work directory and data subdirectory.
+# Data subdirectory location is relative to current location.
+cwd <- here::here()
+data_subdir <- "indego"
+
+# Define where the trip data is coming from - either the original raw data .csv file or a
+# pre-serialized .fst file.
+
+# Indicate whether the tripdata_source should come from a .fst file or a .csv file.
+#tripdata_source <- "fst"
+tripdata_source <- "csv"
+
+# Indicate whether the stationdata_source should come from a .fst file or a .json file.
+#stationdata_source <- "fst"
+stationdata_source <- "json"
+
+# Create a random number seed.
+rseed <- 100163
+
+# Define number of testing folds
+K_FOLDS <- 10
+
+# Naive Bayes Parameters
+NB_LAPLACE_PARAM <- 0.4
+
+```
+
+# LOAD INDEGO TRIP DATA
+
+```{r load_indego_trip_data}
+
+# Set up a garbage collection list.
+unneeded <- c("unneeded")
+
+# Process either the fst file or the .csv file.
+if (tripdata_source == "fst") {
+  # Process the .fst file
+  data2018fst_fpath <- data2018q1_fpath <- file.path(cwd, data_subdir, "indego2018.fst")
+  trips <- read_fst(data2018fst_fpath)
+  
+  unneeded <- c(unneeded, "data2018fst_fpath")
+} else {
+  # Ensure the choice is for a csv file and then process the file.
+  assert_that(tripdata_source == "csv")
+  
+  # Define trip data DF column names
+  rawdata_colnames <- c(
+    "trip_id",         "duration",
+    "start_time",      "end_time", 
+    "start_station",   "start_lat",     "start_lon", 
+    "end_station",     "end_lat",       "end_lon", 
+    "bike_id",         "plan_duration", "trip_route_category", 
+    "passholder_type", "bike_type")
+  
+  # Define raw data column types
+  # All values read as characters and will be converted after initial read
+  rawdata_coltypes <- rep("character", times = 15)
+  
+  # Define full paths to all Indego trip data. (1 CSV file per calendar quarter.)
+  data2018q1_fpath <- file.path(cwd, data_subdir, "indego-trips-2018-q1.csv")
+  data2018q2_fpath <- file.path(cwd, data_subdir, "indego-trips-2018-q2.csv")
+  data2018q3_fpath <- file.path(cwd, data_subdir, "indego-trips-2018-q3.csv")
+  data2018q4_fpath <- file.path(cwd, data_subdir, "indego-trips-2018-q4.csv")
+
+  # Read Indego trip data from quarterly CSV files. 
+  # Note: Electric bikes were introduced in the second half of 2018.
+  # Thus, the bike_type field was not used in the first two quarters.
+  rawdata2018q1 <- read.csv(
+    file = data2018q1_fpath, col.names = rawdata_colnames[-15], colClasses = rawdata_coltypes[-15], 
+    header = TRUE, na.strings = "", sep = ",", strip.white = TRUE)
+  rawdata2018q2 <- read.csv(
+    file = data2018q2_fpath, col.names = rawdata_colnames[-15], colClasses = rawdata_coltypes[-15],
+    header = TRUE, na.strings = "", sep = ",", strip.white = TRUE)
+  rawdata2018q3 <- read.csv(
+    file = data2018q3_fpath, col.names = rawdata_colnames, colClasses = rawdata_coltypes,
+    header = TRUE, na.strings = "", sep = ",", strip.white = TRUE)
+  rawdata2018q4 <- read.csv(
+    file = data2018q4_fpath, col.names = rawdata_colnames, colClasses = rawdata_coltypes,
+    header = TRUE, na.strings = "", sep = ",", strip.white = TRUE)
+  
+  # Get rid of garbage variables
+  unneeded <- c(
+    unneeded, "data2018q1_fpath", "data2018q2_fpath", "data2018q3_fpath", "data2018q4_fpath",
+    "rawdata_colnames", "rawdata_coltypes")
+}
+```
+
+## Cleanup Load Indego Trip Data Variables
+
+```{r clean_load_indego_trip_data}
+
+# Remove unnecessary variables created furing the load_indego_trip_data block.
+rm(list = unneeded)
+
+```
+
+
+# CLEAN INDEGO TRIP DATA
+
+```{r clean_trip_data}
+
+##-------------------------------------------------------------------------------------------------
+## CLEAN INDEGO TRIP DATA
+
+if (tripdata_source == "csv") {
+  # Add bike_type columns to Q1 & Q2.
+  # Turn them to "standard" since this field was added after electric bikes were added.
+  rawdata2018q1$bike_type <- as.character(rep("standard", times = nrow(rawdata2018q1)))
+  rawdata2018q2$bike_type <- as.character(rep("standard", times = nrow(rawdata2018q2)))
+  
+  # Merge all rawdata togther
+  rawdata <- rbind(rawdata2018q1, rawdata2018q2, rawdata2018q3, rawdata2018q4)
+  cat("There are", nrow(rawdata), "original raw data records.\n")
+  
+  # Verify no bike is both electric and stanard. Ideally this value is 0
+  overlapping_biketypes <- intersect(
+    rawdata$bike_id[rawdata$bike_type == "standard"], 
+    rawdata$bike_id[rawdata$bike_type == "electric"])
+  cat("There are", length(overlapping_biketypes), "bikes that are both standard and electric.\n")
+  
+  # Look for NA values
+  invisible(
+    sapply(
+      X = colnames(rawdata),
+      FUN = function(x) cat("There are ", sum(is.na(rawdata[x])), " NAs in ", x, ".\n", sep = "")))
+  
+  # Clean-up #1 Remove any records with "NULL" or NA as the end_lat.
+  # For whatever reason, there are a few in Q3's data.
+  rows_to_remove <- 
+    (rawdata$end_lat == "NULL") | (rawdata$end_lon == "NULL") | 
+    is.na(rawdata$end_lat)      | is.na(rawdata$end_lon)      |
+    is.na(rawdata$start_lat)    | is.na(rawdata$start_lon)
+  cat("There are", sum(rows_to_remove), "rows to be removed due to NAs.\n")
+  
+  # Cleanup #2: Change all "One Day Pass" passholder types to just "Day Pass"
+  # It looks like the pass name may have changed during the year.
+  
+  # Cleanup #3: There is one station with an incorrectly identified latitude. It is listed as a
+  # negative when it should be a positive so we use the absolute value of all latitudes.
+  
+  ## TYPE CONVERSIONS AND INITIAL DATA CLEANING...
+  trips <- rawdata[!rows_to_remove, ] %>%
+    dplyr::mutate(duration = strtoi(duration)) %>%
+    dplyr::mutate(start_time = lubridate::ymd_hms(start_time, tz = Sys.timezone())) %>%
+    dplyr::mutate(end_time = lubridate::ymd_hms(end_time, tz = Sys.timezone())) %>%
+    dplyr::mutate(start_lat = abs(as.numeric(start_lat))) %>%
+    dplyr::mutate(start_lon = as.numeric(start_lon)) %>%
+    dplyr::mutate(end_lat = abs(as.numeric(end_lat))) %>%
+    dplyr::mutate(end_lon = as.numeric(end_lon)) %>%
+    dplyr::mutate(plan_duration = factor(plan_duration)) %>%
+    dplyr::mutate(trip_route_category = factor(trip_route_category)) %>%
+    dplyr::mutate(
+      passholder_type = 
+        factor(ifelse(passholder_type == "One Day Pass", "Day Pass", passholder_type))) %>%
+    dplyr::mutate(bike_type = factor(bike_type)) %>%
+    dplyr::mutate(start_month = lubridate::month(start_time, label = TRUE)) %>%
+    dplyr::mutate(start_day_of_week = lubridate::wday(start_time, label = TRUE)) %>%
+    dplyr::mutate(
+      start_day_of_week_monday = lubridate::wday(start_time, label = TRUE, week_start = 1)) %>%
+    dplyr::mutate(start_hour = strftime(x = start_time, format = "%I%p")) %>%
+    dplyr::mutate(
+      duration_in_half_hours = factor((duration %/% 30) + 1, levels=paste(1:49), ordered=TRUE)) %>%
+    dplyr::mutate(start_station_f = factor(start_station)) %>%
+    dplyr::mutate(end_station_f = factor(end_station))
+  
+  cat("There are", nrow(trips), "remaining data records.\n")
+  
+  # Factorize hour
+  trips$start_hour <- 
+    factor(
+      x = trips$start_hour, 
+      levels = c(
+        "12AM", "01AM", "02AM", "03AM", "04AM", "05AM",
+        "06AM", "07AM", "08AM", "09AM", "10AM", "11AM",
+        "12PM", "01PM", "02PM", "03PM", "04PM", "05PM",
+        "06PM", "07PM", "08PM", "09PM", "10PM", "11PM"),
+      ordered = TRUE)
+  
+  # See if the set of all start_stations and the set of all end_stations are equal.
+  cat(
+    "The set of all start stations and the set of all stop stations are ", 
+    ifelse(dplyr::setequal(trips$start_station, trips$end_station), "", "not "),
+    "equal.\n",
+    sep = "")
+  
+  # Write the updated data to a CSV
+  write_fst(x = trips, path = file.path(cwd, data_subdir, "indego2018.fst"))
+  
+  # Remove unneded variables
+  rm(rawdata2018q1, rawdata2018q2, rawdata2018q3, rawdata2018q4)
+} else {
+  # Ensure the trip data is fst and there are no unexpected values. 
+  assert_that(tripdata_source == "fst")
+}
+
+# Verify if there are any NAs remaining in the teips data
+cat("There are ", sum(is.na(trips)), " records with NA in the trips data. (Ideal = 0)", sep = "")
+
+```
+
+# LOAD INDEGO STATION DATA 
+I have decided to not use the Indego csv station table and instead, use a current copy of their GeoJSON record that contains a list of all stations. This file also includes geocodes, so they don't have to be interpreted from the trip data that can contain multiple geocodes for a common station. I am assuming this is data error so we are using the GeoJSON data to disambiguate the problem. 
+
+```{r load_indego_station_data}
+
+if (stationdata_source == "fst")
+{
+  # Define full path to Indego station data.
+  stationdata_fstfpath <- file.path(cwd, data_subdir, "indego_stations.fst")
+  
+  # Load the stations from the previously-serialized data.
+  stations <- read_fst(stationdata_fstfpath)
+  
+  # Remove garbage
+  rm(stationdata_fstfpath)
+} else {
+  # Ensure that the choice is for a .csv file. If so, process the file. If not, error.
+  assert_that(stationdata_source == "json")
+  
+  # Define full path to Indego station data.
+  stationdata_csvfpath <- file.path(cwd, data_subdir, "indego_stations.geojson")
+  
+  # Read Indego station data from the geoJSON file
+  # Concentrate on just the features sublist of the GeoJSON data. 
+  station_geojson <- jsonlite::read_json(path = stationdata_csvfpath)
+  station_gj_features <- station_geojson$features
+  
+  ## Create a list of station dataframe records. As usual whenever I fall back to a for loop, I'm 
+  ## sure there is a more efficient way to do this in R using a single apply function, but I was 
+  ## wasting too much time trying to figure out the exact correct operands. 
+
+  # Initialize a stations dataframe list
+  stations <- 
+    as.data.frame(t(unlist(station_gj_features[[1]]$properties)), stringsAsFactors = FALSE)
+  # Loop through the remaining stations, adding them to the list. 
+  for (i in 2:length(station_gj_features)) {
+    s <- as.data.frame(t(unlist(station_gj_features[[i]]$properties)), stringsAsFactors = FALSE)
+    stations <- rbind(stations, s)
+  }
+  
+  # We will need a count of station usage for a derived column.
+  start_station_usage <- table(trips$start_station)
+  
+  # And now the data types must be converted.
+  stations <- stations %>%
+    dplyr::mutate(bikesAvailable = strtoi(bikesAvailable)) %>%
+    dplyr::mutate(kioskPublicStatus = factor(kioskPublicStatus)) %>%
+    dplyr::mutate(latitude = as.numeric(latitude)) %>%
+    dplyr::mutate(longitude = as.numeric(longitude)) %>%
+    dplyr::mutate(classicBikesAvailable = strtoi(classicBikesAvailable)) %>%
+    dplyr::mutate(smartBikesAvailable = strtoi(smartBikesAvailable)) %>%
+    dplyr::mutate(electricBikesAvailable = strtoi(electricBikesAvailable)) %>%
+    dplyr::mutate(totalDocks = strtoi(totalDocks)) %>%
+    dplyr::mutate(bikesAvailable = strtoi(bikesAvailable)) %>%
+    dplyr::mutate(docksAvailable = strtoi(docksAvailable)) %>%
+    dplyr::mutate(
+      totalBikesAvailable = classicBikesAvailable + smartBikesAvailable + electricBikesAvailable) %>%
+    dplyr::mutate(
+      marker_color = 
+        dplyr::case_when(
+          start_station_usage[kioskId] <  5000 ~ "lightblue",
+          start_station_usage[kioskId] < 10000 ~ "blue",
+          start_station_usage[kioskId] < 15000 ~ "orange",
+          TRUE                                 ~ "red")) %>%
+      dplyr::mutate(
+        marker_label = 
+          "(" %s+% kioskId %s+% ") " %s+% name %s+% 
+          "; Lat: " %s+% latitude %s+% 
+          "; Lon: " %s+% longitude %s+% 
+          "; Total Docks: " %s+% totalDocks %s+%
+          "; Bikes Available: " %s+% bikesAvailable)
+
+  # Remove any unecessary garbage.
+  rm(stationdata_csvfpath, station_geojson, station_gj_features, s)
+}
+
+```
+
+# VERIFY STATIONS IN TRIPS
+
+```{r verify_stations_in_trips}
+
+# Gather lists of known kiosks and used start stations.
+kiosks <- unique(stations$kioskId)
+start_stations <- unique(trips$start_station)
+
+# Determine any start stations used that are not known. Remove trips that start from those stations.
+unknown_start_stations <- setdiff(start_stations, kiosks)
+if (length(unknown_start_stations) > 0) {
+  cat("The following starting stations are unknown: ", unknown_start_stations, "\n", sep=" ")
+  # Remove records with unknown start stations
+  before <- nrow(trips)
+  trips <- trips[!(trips$start_station %in% unknown_start_stations), ]
+  vol_unknown_start_stations <- before - nrow(trips)
+  cat(
+    vol_unknown_start_stations, 
+    " trips have been removed that have started from these stations.\n", sep="")
+} else {
+  cat("All starting stations are known.\n", sep="")
+}
+
+# Gather lists of used end stations.
+end_stations <- unique(trips$end_station)
+
+# Determine any end stations used that are not known. Remove trips that start from those stations.
+unknown_end_stations <- setdiff(end_stations, kiosks)
+if (length(unknown_end_stations) > 0) {
+  cat("The following ending stations are unknown: ", unknown_end_stations, "\n", sep=" ")
+  # Remove records with unknown end stations
+  before <- nrow(trips)
+  trips <- trips[!(trips$end_station %in% unknown_end_stations), ]
+  vol_unknown_end_stations <- before - nrow(trips)
+  cat(
+    vol_unknown_end_stations, 
+    " trips have been removed that have ended at these stations.\n", sep="")
+} else {
+  cat("All ending stations are known.\n", sep="")
+}
+
+# Recompute the list of start and end stations. They may have changed after removal of data.
+start_stations <- unique(trips$start_station)
+end_stations <- unique(trips$start_station)
+
+# Determine unused kiosks. Remove any kiosks that are unknown.
+unused_kiosks <- setdiff(kiosks, union(start_stations, end_stations))
+if (length(unused_kiosks) > 0) {
+  cat("The following kiosks are unused: ", unused_kiosks, "\n", sep=" ")
+  # Remove records with unused kiosks.
+  before <- nrow(stations)
+  stations <- stations[!(stations$kioskId %in% unused_kiosks), ]
+  vol_unused_kiosks <- before - nrow(stations)
+  cat(vol_unused_kiosks, " kiosks have been removed since they were unused.\n", sep="")
+} else {
+  cat("All kiosks are in use.\n", sep="")
+}
+
+```
+
+# LOAD GEOJSON LAYOVER DATA
+
+```{r load_geojson_layover_data}
+
+# Define key Philadelphia geocode data. Pulled once from the Google Maps API.
+philly <- 
+  data.frame(
+    # Center point for Phialdelphia
+    lon = -75.2, lat = 40.0, 
+    # North and south boundaries
+    north = 40.2, south = 39.8,
+    # East and west boundaries
+    east = -74.95, west = -75.3)
+philly$wide <- abs(philly$west - philly$east)
+philly$tall <- abs(philly$north - philly$south) 
+
+## Load GeoJSON layover data
+
+# Define full paths to GeoJSON layover maps...
+# (1) City limits only. Pulled from OpenDataPhill.org
+#     https://www.opendataphilly.org/dataset/city-limits
+philly_city_limits_fpath <- file.path(cwd, data_subdir, "City_Limits.geojson")
+# (2) Zipcode outlines. Pulled from OpenDataPhilly.org
+#     https://www.opendataphilly.org/dataset/zip-codes
+philly_zipcodes_fpath <- file.path(cwd, data_subdir, "Zipcodes_Poly.geojson")
+# (3) Philadelphia neighborhood boundaries. Pulled from Haverford Digital Scholarship Cartography.
+#     https://haverfordds.carto.com/tables/neighborhoods_philadelphia/public
+philly_neighborhoods_fpath <- file.path(cwd, data_subdir, "neighborhoods_philadelphia.geojson")
+
+# Load city GeoJSON
+philly_citylimits_geojson <- jsonlite::read_json(philly_city_limits_fpath)
+
+# Load neighborhood GeoJSON
+philly_neighborhoods_geojson <- jsonlite::read_json(philly_neighborhoods_fpath)
+
+```
+
+# CREATE EDA GRAPHS
+
+## Create historgram of trips by month of the year.
+```{r create_month_histogram}
+
+palette(rainbow(5))
+
+# Create a histogram of monthly bike trips, filled by the passholder type
+ghisto_month <- ggplot(data = trips, mapping = aes(x = start_month)) +
+  stat_count(mapping = aes(fill = passholder_type)) +
+  labs(
+    title = "Frequency of Bike Trips by Month",
+    subtitle = "Fill color by pass type",
+    x = "Month", 
+    y = "Volume", 
+    fill = "Pass Type")
+
+# Display the histogram
+ghisto_month
+
+```
+
+## Create histogram of trips by day of the week.
+
+```{r create_day_of_week_histogram}
+
+# Create histogram of trips by day of the week, filled by the trip type (one way or round trip)
+ghisto_dow <- ggplot(data = trips, mapping = aes(x = start_day_of_week)) +
+  stat_count(mapping = aes(fill = trip_route_category)) +
+  labs(
+    title = "Frequency of Bike Trips by Day of Week",
+    subtitle = "Fill color by trip type",
+    x = "Day", 
+    y = "Volume", 
+    fill = "Trip Type")
+
+# Display the histogram
+ghisto_dow
+
+```
+
+## Create histogram of trips by hour of the day
+
+```{r create_hour_of_day_histogram}
+
+# Create histogram of trips by hour of the day filled by day of the week. 
+ghisto_hr <- ggplot(data = trips, mapping = aes(x = start_hour)) +
+  stat_count(mapping = aes(fill = start_day_of_week_monday)) +
+  labs(
+    title = "Histogram of Bike Trips by Hour of Day",
+    subtitle = "Fill color by day of the week",
+    x = "Hour", 
+    y = "Volume", 
+    fill = "Day of Week") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Display the histogram
+ghisto_hr
+
+```
+
+## Create histogram of station usage
+
+```{r create_station_usage_histogram}
+
+# Create histogram of station usage
+ghisto_station <- ggplot(data = trips, mapping = aes(x = forcats::fct_infreq(start_station))) +
+  geom_bar(mapping = aes(fill = passholder_type)) +
+  labs(
+    title = "Frequency of Bike Trips by Station",
+    subtitle = "Fill color by pass type",
+    x = "Station", 
+    y = "Volume", 
+    fill = "Pass Type") +
+  scale_y_continuous(limits = c(0, 17500)) +
+#  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  ggplot2::annotate(
+    geom = "segment", x = c(6, 69), xend = c(6, 69), y = c(17500, 9500), yend = c(12500, 4500),
+    colour = "red", size=1, arrow=arrow())
+
+# Display the histogram
+ghisto_station
+
+```
+Do some additional research into the stations that look like they have greater than 50% one day pass use use.
+
+```{r additional_station_analysis}
+
+# Make a tabe of station X passholder type statistics.
+station_passtype_t <- table(trips$start_station, trips$passholder_type)
+station_passtype_df <- as.data.frame.matrix(station_passtype_t)
+station_passtype_df$station_id = rownames(station_passtype_df)
+
+# Compute the percent usages for day passes.
+station_passtype_df$daypass_pct = 
+  station_passtype_df$`Day Pass` / 
+  (station_passtype_df$`Day Pass` + 
+     station_passtype_df$Indego30 + 
+     station_passtype_df$Indego365 + 
+     station_passtype_df$IndegoFlex + 
+     station_passtype_df$`Walk-up`)
+
+# Review all stations whose daypass is > 50%
+walkup_stations <- station_passtype_df[station_passtype_df$daypass_pct > 0.5, ] %>%
+  left_join(y = stations, by = c('station_id' = 'kioskId'))
+walkup_stations
+
+```
+
+## Pareto chart of trip duration in half hour increments
+
+```{r pareto_charts}
+
+duration_counts <- table(trips$duration_in_half_hours)
+ordered_duration_counts <- sort(duration_counts, decreasing = TRUE)
+
+# Show a Pareto of trip durations
+pcht <- qcc::pareto.chart(
+  data = ordered_duration_counts[1:10],
+  main = "Pareto Chart of Trip Durations (First 5 hours only)",
+  xlab = "Half Hour Increments", ylab = "Volume of Trips", ylab2 = "Cumulative Percentage")
+
+```
+
+## Create a histogram of the duration of trips that are 1/2 hour or less
+
+```{r histogram_of_trip_duration}
+
+# Create a histogram of the duration of trips that are 1/2 hour or less
+ghisto_duration <- 
+  ggplot(data = trips[trips$duration_in_half_hours == 1, ], mapping = aes(x = duration)) +
+  geom_histogram(mapping = aes(fill = trip_route_category), bins = 29, color = "white") +
+  labs(
+    title = "Frequency of trips durations under 1/2 hour",
+    subtitle = "Fill color by trip category",
+    fill = "Trip Category",
+    x = "Trip duration (minutes)",
+    y = "Count of trips") +
+  scale_x_continuous(breaks = seq(from = 0, to = 30))
+
+# Plot the histogram
+ghisto_duration
+
+```
+
+## Create a heatmap of start & end stations
+
+```{r create_start_end_heatmap}
+
+station_heatmap_t <- table(trips$start_station, trips$end_station)
+station_heatmap_df <- data.frame(station_heatmap_t[1:80, 1:80])
+names(station_heatmap_df) <- c("start_station", "end_station", "volume")
+gheatmap_base <- 
+  ggplot(data = station_heatmap_df, mapping = aes(x=start_station, y=end_station, fill=volume)) +
+  geom_tile() + 
+  scale_fill_gradient(low = "white", high = "navy") +
+  labs(
+    title = "Heatmap of Trips Volumes Between Stations",
+    x = "Starting Station",
+    y = "Ending Station",
+    fill = "Trip Volume") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  coord_fixed()
+gheatmap_base
+
+gheatmap_annotated <- gheatmap_base + 
+  geom_segment(
+    mapping = aes(x = "3005", y = "3004", xend = "3100", yend = "3099"),
+    size = 0.5, color="gold3", linetype = "dashed") +
+  geom_segment(
+    mapping = aes(x = "3012", y = "3020", xend = "3020", yend = "3012"),
+    color="red",
+    arrow = arrow(ends = "both", type = "closed", angle = 25, length = unit(4, "mm"))) +
+  geom_segment(
+    mapping = aes(x = "3032", y = "3020", xend = "3020", yend = "3032"),
+    color="red",
+    arrow = arrow(ends = "both", type = "closed", angle = 25, length = unit(4, "mm"))) +
+  geom_segment(
+    mapping = aes(x = "3066", y = "3020", xend = "3020", yend = "3066"),
+    color="red",
+    arrow = arrow(ends = "both", type = "closed", angle = 25, length = unit(4, "mm"))) +
+  geom_point(mapping = aes(x = "3057",y = "3057"), size=9, shape=1, color="gold3")
+gheatmap_annotated
+
+```
+
+## Bicycle Analysis
+
+```{r analyze_bikes}
+
+
+g_bikes <- ggplot(data = trips, mapping = aes(x = forcats::fct_infreq(bike_id), fill = bike_type)) +
+  geom_bar() +
+  labs (
+    title = "2018 Bicyle Usage - Volume of Trips Per Bike",
+    x = "Individual Bikes",
+    y = "Volume of Trips",
+    fill = "") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+g_bikes
+
+```
+
+
+# MAP-BASED EDA
+
+## Create base maps
+
+```{r create_base_maps}
+
+##-------------------------------------------------------------------------------------------------
+## MAP-BASED EDA
+
+# Create based maps.
+
+m_base <- leaflet() %>%
+  # Use the default OpenMap tiles
+  addTiles() %>%
+  # Map the outlines of individual Philadelphia neighborhoods on top of the city. 
+  # (I wish I could figure out how to label the neighborhoods as well.)
+  addGeoJSON(geojson = philly_citylimits_geojson, weight = 2, color = "burlywood1") %>%
+  # Set the desired zoom level. Don't allow panning beyond the city +/- a few degrees lat/long.
+  setMaxBounds(lng1 = philly$east, lng2 = philly$west, lat1 = philly$north, lat2 = philly$south) %>%
+  addScaleBar(position = "bottomright")
+m_base
+
+m_zoomedonphilly <- m_base %>%
+  setView(lng = philly$lon, lat = philly$lat, zoom = 11)
+m_zoomedonphilly
+
+```
+
+```{r create_all_stations_map}
+
+# Create a map of all the Indego stations in Philadelphia
+
+# Create icons to mark very active, more active, and less active bike stations
+icon_bike_lightblue <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = 'lightblue', library = 'fa', squareMarker =  FALSE)
+icon_bike_blue <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = 'blue', library = 'fa', squareMarker =  FALSE)
+icon_bike_orange <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = 'orange', library = 'fa', squareMarker =  FALSE)
+icon_bike_red <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = 'red', library = 'fa', squareMarker =  FALSE)
+icon_bike_white <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = 'white', library = 'fa', squareMarker =  FALSE)
+icon_bike_yellow <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = "beige", library = 'fa', squareMarker =  FALSE)
+icon_bike_green <- makeAwesomeIcon(
+  icon = "bicycle", markerColor = 'green', library = 'fa', squareMarker =  FALSE)
+icon_you_are_here <- makeAwesomeIcon(
+  icon = "user", markerColor = 'white', library = 'fa', squareMarker =  TRUE)
+
+# Create subsets of stations to serve as separate icon layers.
+lightblue_subset   <- stations[stations$marker_color == "lightblue", ]
+blue_subset   <- stations[stations$marker_color == "blue", ]
+orange_subset <- stations[stations$marker_color == "orange", ]
+red_subset    <- stations[stations$marker_color == "red", ]
+
+m_allstations <- m_base %>%
+  # Add the white (less active) markers
+  addAwesomeMarkers(
+    lng = lightblue_subset$longitude, lat = lightblue_subset$latitude,
+    icon = icon_bike_lightblue, popup = lightblue_subset$marker_label) %>%
+  # Add the blue (active) markers
+  addAwesomeMarkers(
+    lng = blue_subset$longitude, lat = blue_subset$latitude,
+    icon = icon_bike_blue, popup = blue_subset$marker_label) %>%
+  # Add the orange (more active) markers
+  addAwesomeMarkers(
+    lng = orange_subset$longitude, lat = orange_subset$latitude,
+    icon = icon_bike_orange, popup = orange_subset$marker_label) %>%
+  # Add the red (very active) markers
+  addAwesomeMarkers(
+    lng = red_subset$longitude, lat = red_subset$latitude,
+    icon = icon_bike_red, popup = red_subset$marker_label)
+m_allstations
+
+m_allstations_allphilly <-
+  m_allstations %>%
+  setView(lng = philly$lon, lat = philly$lat, zoom = 11)
+m_allstations_allphilly
+
+
+```
+
+## Show Previosly-generated walk-up stations
+
+```{r show_walk_up_stations}
+
+m_walkup <- m_base %>%
+  addAwesomeMarkers(
+    lng = walkup_stations$longitude, lat = walkup_stations$latitude,
+    icon = icon_bike_white, popup = walkup_stations$marker_label)
+m_walkup
+
+```
+
+
+# ASSOCIATION RULES
+
+## General association rules
+
+```{r run_general_association_rules}
+
+##-------------------------------------------------------------------------------------------------
+## ASSOCIATION RULES
+
+# Run some general association rules.
+
+# Define columns to be included in the rule sets.
+rules_columns <- c(
+  "bike_type", "trip_route_category", "passholder_type", "start_month", "start_day_of_week",
+  "start_hour", "duration_in_half_hours", "start_station_f", "end_station_f")
+
+# Define a list of common rules to be excluded from the rule sets because these rules are
+# excessivley common. Over 99% of all bikes are standard. Over 88% of all trips are less than
+# 1/2 hour. Almost 72 of all pass types are Indego 30.
+common_rules <- c("bike_type=standard", "duration_in_half_hours=1", "passholder_type=Indego30")
+
+# Define an format the input data for rules generation.
+rules_subset <- trips[, rules_columns]
+transacton_data <- as(rules_subset, "transactions")
+
+# Generate and summarize the rules.
+rules <- arules::apriori(
+  data = transacton_data, 
+  parameter = list(support = 0.01, confidence = 0.1, minlen = 2), 
+  appearance = list(none = common_rules))
+summary(rules)
+
+# Sort (by lift) and view the rules. 
+srules <- sort(rules, decreasing = TRUE, by = "lift")
+arules::inspect(srules)
+
+```
+
+## Station-to-station association rules. 
+
+```{r run_station_to_station_association_rules}
+
+# Define the list of data eleemnts to be inter-associated.
+from_to <- c("start_station_f", "end_station_f")
+
+# Define and format the data subset to be input to the association rules process.
+from_to_subset <- trips[, from_to]
+from_to_transactions <- as(from_to_subset, "transactions")
+
+# To ensure that all rules start with a start station and end with an end station, create a list
+# of rule clauses of the form "start_station=nnnn" where nnnn are station ids. This list will be 
+# used to ensure that start_stations appear only on the LHS of the rule.
+start_rules <- c(paste("start_station_f=", sort(unique(trips$start_station)), sep="")) 
+
+# Generate and summarize the start-station/end-station rules.
+from_to_rules <- arules::apriori(
+  data = from_to_transactions, 
+  parameter = list(support = 0.00001, minlen = 2, target = "frequent itemsets"),
+  appearance = list(lhs = start_rules))
+summary(from_to_rules)
+
+# Sort and view the rules by support, which should be equal to the most common start/stop
+# destination pairs.
+from_to_srules <- sort(from_to_rules, decreasing = TRUE, by = "support")
+arules::inspect(from_to_srules)
+
+```
+
+## Map the Top 10 Trip Routes
+
+```{r map_top_10_trip_routes}
+
+# Create a convenience function that will return the station from a single side of a rule.
+get_station_id <- function (rules) {
+  # Define requisite search patterns.
+  start_pattern <- "start_station_f=[0-9]+"
+  end_pattern <- "end_station_f=[0-9]+"
+  num_pattern <- "[0-9]+"
+
+  # Pull start_station labels of the form "start_station=nnnn" from the left-hand side of the rules
+  # and then get the numberic (station #) portion of the rule only.
+  lhs <- unlist(lapply(X=rules, FUN=function(x) str_match(string=x, pattern=start_pattern)))
+  start_stns <- unlist(lapply(X=lhs, FUN=function(x) str_match(string=x, pattern=num_pattern)))
+  
+  # Pull start_station labels of the form "end_station=nnnn" from the left-hand side of the rules
+  # and then get the numberic (station #) portion of the rule only.
+  rhs <- unlist(lapply(X=rules, FUN=function(x) str_match(string=x, pattern=end_pattern)))
+  end_stns <- unlist(lapply(X=rhs, FUN=function(x) str_match(string=x, pattern=num_pattern)))
+  
+  # Save the result and remove garbage before exiting.
+  result = data.frame(from_station = start_stns, to_station = end_stns, stringsAsFactors = FALSE)
+  rm(start_pattern, end_pattern, num_pattern)
+  rm(lhs, rhs, start_stns, end_stns)
+  
+  # Return
+  return(result)
+}
+
+# Extract the rules by text
+top10triprules <- labels(from_to_srules[1:10])
+top10tripdata <- get_station_id(top10triprules)
+
+# Subset the trips into one-way and roundtrip
+top1waydata <- top10tripdata[top10tripdata$from_station == top10tripdata$to_station, ]
+toproundtripdata <- top10tripdata[top10tripdata$from_station != top10tripdata$to_station, ]
+
+lat1way <- stations$latitude[stations$kioskId == top1waydata$from_station]
+lon1way <- stations$longitude[stations$kioskId == top1waydata$from_station]
+
+m_toptrips <- m_base %>%
+  addAwesomeMarkers(
+    lng = stations$longitude[stations$kioskId %in% top1waydata$from_station],
+    lat = stations$latitude[stations$kioskId %in% top1waydata$from_station],
+    icon = icon_bike_white, 
+    popup = stations$marker_label[stations$kioskId %in% top1waydata$from_station])
+m_toptrips
+
+# Create a 
+paths <- data.frame(
+  grp   = "Route" %s+% 1:nrow(toproundtripdata),
+  fr_st = toproundtripdata$from_station,
+  to_st = toproundtripdata$to_station,
+  stringsAsFactors = FALSE)
+
+for (i in 1:nrow(paths)) {
+  from_lat <- stations$latitude[stations$kioskId == paths$fr_st[i]]
+  from_long <- stations$longitude[stations$kioskId == paths$fr_st[i]]
+  from_marker <- stations$marker_label[stations$kioskId == paths$fr_st[i]]
+  to_lat <- stations$latitude[stations$kioskId == paths$to_st[i]]
+  to_long <- stations$longitude[stations$kioskId == paths$to_st[i]]
+  to_marker <- stations$marker_label[stations$kioskId == paths$to_st[i]]
+  
+  m_toptrips <- m_toptrips %>%
+    addAwesomeMarkers(lng = from_long, lat = from_lat, icon = icon_bike_blue, popup = from_marker) %>%
+    addAwesomeMarkers(lng = to_long, lat = to_lat, icon = icon_bike_blue, popup = to_marker) %>%
+    addFlows(
+      lng0 = from_long, lat0 = from_lat, 
+      lng1 = to_long, lat1 = to_lat, 
+      color = ifelse(from_long > to_long, "blue", "red"), 
+      maxFlow = 10, flow = 5, maxThickness = 10)
+}
+m_toptrips
+
+```
+
+# CLUSTERING
+
+## K-means Clustering
+
+```{r}
+
+##-------------------------------------------------------------------------------------------------
+## CLUSTERING - KMEANS
+
+set.seed(100163)
+
+kmc_data_orig <- stations[, c("kioskId", "latitude", "longitude", "bikesAvailable")]
+kmc_data <- kmc_data_orig
+kmc_data$latitude <- abs(scale(kmc_data$latitude, center = TRUE))
+kmc_data$longitude <- abs(scale(kmc_data$longitude, center = TRUE))
+kmc_data$bikesAvailable <- abs(scale(kmc_data$bikesAvailable, center = TRUE))
+# kmc_data$totalDocks <- abs(scale(kmc_data$totalDocks, center = TRUE))
+
+km_model <- stats::kmeans(x = kmc_data[, -1], centers = 5, nstart = 10)
+kmc_data <- kmc_data %>%
+  mutate(cluster = km_model$cluster)
+
+cl1 <- stations[(stations$kioskId == kmc_data$kioskId) & (kmc_data$cluster == 1), ]
+cl2 <- stations[(stations$kioskId == kmc_data$kioskId) & (kmc_data$cluster == 2), ]
+cl3 <- stations[(stations$kioskId == kmc_data$kioskId) & (kmc_data$cluster == 3), ]
+cl4 <- stations[(stations$kioskId == kmc_data$kioskId) & (kmc_data$cluster == 4), ]
+cl5 <- stations[(stations$kioskId == kmc_data$kioskId) & (kmc_data$cluster == 5), ]
+
+m_km <- m_base %>%
+  addAwesomeMarkers(
+    lng = cl1$longitude, lat = cl1$latitude, icon = icon_bike_blue, popup = cl1$marker_label) %>%
+  addAwesomeMarkers(
+    lng = cl2$longitude, lat = cl2$latitude, icon = icon_bike_red, popup = cl2$marker_label) %>%
+  addAwesomeMarkers(
+    lng = cl3$longitude, lat = cl3$latitude, icon = icon_bike_green, popup = cl3$marker_label) %>%
+  addAwesomeMarkers(
+    lng = cl4$longitude, lat = cl4$latitude, icon = icon_bike_white, popup = cl4$marker_label) %>%
+  addAwesomeMarkers(
+    lng = cl5$longitude, lat = cl5$latitude, icon = icon_bike_yellow, popup = cl5$marker_label)
+m_km
+
+# Create a 3D plot to show how the 
+scatter3D(x = cl1$longitude, y = cl1$latitude, z = cl1$bikesAvailable, col = "blue", phi = -1, bty="b2")
+scatter3D(x = cl3$longitude, y = cl3$latitude, z = cl3$bikesAvailable, col = "green", add = TRUE)
+
+
+```
+
+
+## Hierarchical Clustering
+
+```{r run_hierarchical_clustering}
+
+##-------------------------------------------------------------------------------------------------
+## CLUSTERING - HCLUST
+
+set.seed(100163)
+
+# Pick a point representing "YOU ARE HERE".
+my_lon <- -75.16
+my_lat <- 39.972
+
+# Create a smaller sample data subset
+hc_data_orig <- stations[, c("kioskId", "marker_label", "latitude", "longitude")]
+hc_data <- dplyr::sample_n(tbl = hc_data_orig, size = 12, replace = FALSE)
+
+# Add new points forcing the selected point to the center.
+my_location <- data.frame(
+  kioskId = "*ME1*", marker_label = "ME1", latitude=my_lat, longitude = my_lon)
+my_location2 <- data.frame(
+  kioskId = "*ME2*", marker_label = "ME2", latitude=my_lat, longitude = my_lon)
+
+hc_data <- rbind(hc_data, my_location, my_location2)
+
+# Name each sample by the kiosk.
+rownames(hc_data) <- hc_data$kioskId
+
+hc_dist <- stats::dist(hc_data[, 3:4], method = "manhattan")
+hc_clust <- stats::hclust(d = hc_dist, method = "single")
+plot(hc_clust)
+hc_labels <- hc_clust$labels
+hc_order <- hc_clust$order
+
+m_hc <- m_base 
+for (i in hc_order) {
+  if ((hc_labels[i] %s==% "*ME*") | (hc_labels[i] %s==% "*ME2*")) {
+    m_hc <- m_hc %>% 
+      addAwesomeMarkers(
+        lng = hc_data[hc_data$kioskId == hc_labels[i], "longitude"], 
+        lat = hc_data[hc_data$kioskId == hc_labels[i], "latitude"], 
+        icon = icon_you_are_here, 
+        popup = hc_data[hc_data$kioskId == hc_labels[i], "marker_label"])
+  } else {
+    m_hc <- m_hc %>% 
+      addAwesomeMarkers(
+        lng = hc_data[hc_data$kioskId == hc_labels[i], "longitude"], 
+        lat = hc_data[hc_data$kioskId == hc_labels[i], "latitude"], 
+        icon = icon_bike_blue, 
+        popup = hc_data[hc_data$kioskId == hc_labels[i], "marker_label"])
+  }
+}
+m_hc
+
+# 3037 3004 3021 3010 3007 3012 3049 3038 3071 3150 3096 3183
+```
+
+
+
+
+```{r run_hierarchical_clustering}
+
+##-------------------------------------------------------------------------------------------------
+## CLUSTERING - HCLUST
+
+set.seed(100163)
+
+# Create a smaller sample data subset
+hc_data_orig <- stations[, c("kioskId", "marker_label", "bikesAvailable", "docksAvailable")]
+hc_data <- dplyr::sample_n(tbl = hc_data_orig, size = 16, replace = FALSE)
+
+hc_dist <- philentropy::distance(hc_data[, 3:4], method = "manhattan", test.na = FALSE)
+rownames(hc_dist) <- hc_data$kioskId
+colnames(hc_dist) <- hc_data$kioskId
+hc_dist <- as.dist(hc_dist)
+
+#hc_dist <- stats::dist(hc_data[, 3:4], method = "manhattan")
+hc_clust <- stats::hclust(d = hc_dist, method = "complete")
+hc_cut <- stats::cutree(hc_clust, k = 3)
+plot(hc_clust)
+hc_labels <- hc_clust$labels
+hc_order <- hc_clust$order
+
+print(hc_data[, c(1,3,4)])
+hc_cut
+
+# m_hc <- m_base
+# for (i in hc_order) {
+#   if ((hc_labels[i] %s==% "*ME*") | (hc_labels[i] %s==% "*ME2*")) {
+#     m_hc <- m_hc %>%
+#       addAwesomeMarkers(
+#         lng = hc_data[hc_data$kioskId == hc_labels[i], "longitude"],
+#         lat = hc_data[hc_data$kioskId == hc_labels[i], "latitude"],
+#         icon = icon_you_are_here,
+#         popup = hc_data[hc_data$kioskId == hc_labels[i], "marker_label"])
+#   } else {
+#     m_hc <- m_hc %>%
+#       addAwesomeMarkers(
+#         lng = hc_data[hc_data$kioskId == hc_labels[i], "longitude"],
+#         lat = hc_data[hc_data$kioskId == hc_labels[i], "latitude"],
+#         icon = icon_bike_blue,
+#         popup = hc_data[hc_data$kioskId == hc_labels[i], "marker_label"])
+#   }
+# }
+# m_hc
+
+# 3037 3004 3021 3010 3007 3012 3049 3038 3071 3150 3096 3183
+```
+
+
+
+
+
+
+# DECISION TREES AND RANDOM FORESTS
+
+## Decision Tree 
+
+### Predict end station
+
+```{r run_decision_tree}
+
+##-------------------------------------------------------------------------------------------------
+## DECISION TREE MODEL
+
+# Record the station's usages for the year.
+station_output <- table(trips$start_station)
+station_intake <- table(trips$end_station)
+
+# Add to the stations table. The "as.integer" part removes the table type from the saved data.
+stations$output <- as.integer(station_output[stations$kioskId %in% names(station_output)])
+stations$intake <- as.integer(station_intake[stations$kioskId %in% names(station_intake)])
+
+# Goal: Determine which station a bike will likely be taken back to from day of week, hour of day,
+# month, start station, and type of bike and passholder type
+
+total_items <- nrow(trips)
+total_range <- c(1:total_items)
+
+dt_fields <- c(
+  "start_month", "start_day_of_week_monday", "start_hour", 
+#  "start_station_f", "end_station_f",
+"start_lat", "start_lon", "end_station_f",
+  "bike_type", "passholder_type")
+sample_items <- sample(total_range, size = 24, replace = FALSE)
+sample_vol <- NROW(sample_items)
+dt_data <- trips[sample_items, dt_fields]
+
+# Run cross-folds validation
+k <- 10
+test_vol <- round(sample_vol/k)
+for (fold in 1:1) {
+#  train_range <- setdiff(sample_items, test_range)
+  dt_train <- dt_data
+  dt_test <- dt_data
+  
+ print(system.time(dt_model <- rpart::rpart(
+   formula = end_station_f ~ ., 
+   data = dt_train,
+   method = "class")))
+ f <- fancyRpartPlot(dt_model)
+ summary(dt_model)
+}
+
+```
+
+### Predict trip duration
+
+```{r run_decision_tree}
+
+##-------------------------------------------------------------------------------------------------
+## DECISION TREE MODEL
+
+# Goal: How long a trip will take given when it is taken out and the passholder type
+
+total_items <- nrow(trips)
+total_range <- c(1:total_items)
+
+set.seed(rseed)
+
+dt_fields <- c(
+  "duration", "start_month", "start_day_of_week_monday", "start_hour", 
+  "start_lat", "start_lon", "bike_type", "passholder_type")
+sample_items <- sample(total_range, size = 1000, replace = FALSE)
+sample_vol <- NROW(sample_items)
+dt_data <- trips[sample_items, dt_fields]
+
+#  train_range <- setdiff(sample_items, test_range)
+dt_train <- dt_data
+dt_test <- dt_data
+  
+ dt_model <- rpart::rpart(
+   formula = duration ~ ., 
+   data = dt_train,
+   method = "anova",
+   control = rpart.control(minsplit = 30))
+ 
+ # Print the tree
+ f <- fancyRpartPlot(dt_model)
+ 
+ # Run a prediciton
+ p <- predict(object = dt_model, newdata = dt_test)
+ p_dt <- dt_test[order(rownames(dt_test)), ]
+ p_dt$prediction <- p[sort(names(p))]
+ 
+ # Plot the prediction
+ g_dtpoint <- 
+   ggplot(data = p_dt, mapping = aes(x = duration, y = prediction, size=abs(duration-prediction))) +
+   geom_point() +
+   labs(
+     title = "Predicted Trip Duration vs. Actual Trip Duration",
+     subtitle = "Durations Recorded in Minutes.\n" %s+%
+       "Size is proportional to the absolute value of the residual.",
+     x = "Actual Duration",
+     y = "Predicted Duration",
+     size = "Residual")
+g_dtpoint
+
+ # Plot the prediction
+ g_dtres <- 
+   ggplot(
+     data = p_dt, 
+     mapping = aes(
+       x = duration, y=abs(prediction - duration), color=factor(sign(prediction - duration)))) +
+   geom_point() +
+   labs(
+     title = "Residaual of (Predicted - Actual) Duration vs. Actual Trip Duration",
+     subtitle = "Color shows sign of the residual.",
+     x = "Actual Duration",
+     y = "Residual of (Actual - Predicted) Duration") +
+   scale_color_discrete(name = "Positive or Negative", labels = c("Negative", "Positive"))
+g_dtres
+
+```
+
+# DATA SUBSET - TOP 16 STATIONS
+
+```{r}
+
+##-------------------------------------------------------------------------------------------------
+## CREATE A SUBSET OF TRIPS TO/FROM THE TOP 16 MOST-USED STATIONS ONLY.
+## 
+## This is done to limit the amount of stations for predictive analysis. Many of the algorithms 
+## used either refused to work with as many as 130 predictive choices or do not return in a
+## reasonable amount of time. 
+
+# Determine the top 16 most used stations.
+top_16_stations <- head(forcats::fct_infreq(unique(c(trips$start_station, trips$end_station))), n=16)
+
+# Create a subset of trips whose start *and* end stations are in the set of top-16 stations.
+trips_16 <- 
+  trips[(trips$start_station %in% top_16_stations) & (trips$end_station %in% top_16_stations), ]
+
+# Refactor the stations to make them a list of 16 rather than 130.
+cat("Before refactoring:\n")
+levels(trips_16$start_station_f)
+levels(trips_16$end_station_f)
+trips_16$start_station_f <- factor(trips_16$start_station_f)
+trips_16$end_station_f <- factor(trips_16$end_station_f)
+cat("\nAfter refactoring:\n")
+levels(trips_16$start_station_f)
+levels(trips_16$end_station_f)
+
+# Renumber the rows of the new subset
+trips_16 <- data.frame(trips_16, row.names = NULL)
+
+# Make the stations a set of 16 
+
+# And record the number of records
+trips_16_nrows <- nrow(trips_16)
+
+```
+
+# RANDOM FOREST
+
+```{r run_random_forest}
+
+rf_fields <- c(
+  "end_station_f",
+  "start_time", "passholder_type", "start_lat", "start_lon", "duration")
+
+total_items <- nrow(trips)
+total_range <- c(1:total_items)
+
+# Subset from just the top 16 most used stations.
+set.seed(rseed)
+# top_16_stations <- head(forcats::fct_infreq(unique(c(trips$start_station, trips$end_station))), n=16)
+# trips_16 <- trips[(trips$start_station %in% top_16_stations) & (trips$end_station %in% top_16_stations), ]
+
+# # Renumber the rows
+# trips_16 <- data.frame(trips_16, row.names = NULL)
+
+# Refactor the start and end stations to make them a factor of 16 items, not 130.
+trips_16$start_station_f <- factor(trips_16$start_station_f)
+trips_16$end_station_f <- factor(trips_16$end_station_f)
+
+set.seed(rseed)
+#sample_items <- sample(nrow(trips_16), size = 11000, replace = FALSE)
+sample_items <- 1:nrow(trips_16)
+sample_recs <- trips_16[sample_items, rf_fields]
+sample_vol <- nrow(sample_recs)
+
+results <- list()
+
+# Run cross-folds validation
+test_vol <- round(sample_vol/K_FOLDS)
+for (fold in 1:K_FOLDS) {
+  cat("Fold ", fold, "\n", sep="")
+  test_range <- c(floor(((fold-1)*test_vol)+1):floor(min(fold*test_vol, sample_vol)))
+  # Leave out the end station labels.
+  rf_train <- sample_recs[-test_range, -1]
+  rf_test <- sample_recs[test_range, -1]
+  # Just the labels
+  rf_train_labels <- sample_recs$end_station_f[-test_range]
+  rf_test_labels <- sample_recs$end_station_f[test_range]
+
+  print(system.time(
+  rf_model <- randomForest::randomForest(
+    x = rf_train, xtest = rf_test, y = rf_train_labels, ytest = rf_test_labels, ntree = 200)))
+  rf_model$test$confusion
+  results[[fold]] <- rf_model$test$confusion
+  
+  plot(rf_model, main = "Random Forest Error Rates For Determining Destination Station")
+}
+
+# Pick a random confusion matrix to plot
+confmat <- results[[5]][1:16,1:16]
+confmat_df <- reshape2::melt(confmat)
+confmat_df$Var1 <- as.character(confmat_df$Var1)
+confmat_df$Var2 <- as.character(confmat_df$Var2)
+g_rfheat <- ggplot(data = confmat_df, mapping = aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "gray30") +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  scale_fill_continuous(low = "white", high = "midnightblue") +
+  labs(
+    title = "Heatmap of Random Forest Predictions",
+    x = "Actual",
+    y = "Predicted",
+    fill = "Prediction Volume")
+g_rfheat
+
+all_error <- results[[1]][, 17]
+for (fold in 2:K_FOLDS) {
+  all_error <- rbind(all_error, results[[fold]][, 17])
+}
+error_df_tmp <- reshape2::melt(all_error)
+
+# Provide proper names and remove the first unneeded column
+error_df <- data.frame(
+  stationc = as.character(error_df_tmp$Var2), 
+  stationf = factor(error_df_tmp$Var2), 
+  error = error_df_tmp$value) 
+intake_all <- unlist(
+  lapply(X = error_df$stationc, FUN = function (x) stations$intake[stations$kioskId == x]))
+error_df$intake <- intake_all
+
+g_rferror <- ggplot(data = error_df, mapping = aes(y = error, x = stationf, color = intake)) +
+  geom_boxplot() +
+  labs(
+    title= "Error Ranges for Random Forest Predicion of Destination Station",
+    subtitle = "Color represents intake volume of the station.",
+    x = "Station",
+    y = "Prediction Error",
+    color = "Station Intake Volume") +
+  scale_color_gradientn(colors = rev(rainbow(5)))
+g_rferror
+
+```
+
+```{r}
+rm (rf_fields, rf_train, rf_train_labels, rf_test, rf_test_labels)
+rm(total_items, total_range)
+rm(sample_items, sample_recs, sample_vol)
+```
+
+
+# SUPPORT VECTOR MACHINE
+
+# SVM BEST
+# Radial: c = 15000
+# Linear: c = 75
+# Polynomial: c=60; coef0 = 0.7; gamma = 1; degree = 7
+# 
+
+```{r run_support_vector_machine}
+
+svm_fields <- c("end_station_f", "start_time", "start_lat", "start_lon", "duration")
+kernel_param <- "radial"
+
+c_param <- 15000
+coef0_param <- 0
+gamma_param <- 0
+degree_param <- 3
+
+# Subset from just the top 16 most used stations.
+set.seed(rseed)
+
+total_range <- c(1:trips_16_nrows)
+
+svmresults <- list()
+subset_indices <- sample(x = total_range, size = 2000, replace = FALSE)
+svm_trips <- trips_16[subset_indices, svm_fields]
+svm_trips$start_time <- scale(svm_trips$start_time)
+svm_trips$start_lat <- scale(svm_trips$start_lat)
+svm_trips$start_lon <- scale(svm_trips$start_lon)
+svm_trips$duration <- as.numeric(svm_trips$duration)
+svm_trips$duration <- scale(svm_trips$duration)
+
+svm_items <- nrow(svm_trips)
+
+# Run cross-folds validation
+test_vol <- round(svm_items/K_FOLDS)
+for (fold in 1:K_FOLDS) {
+  cat("Fold ", fold, "\n", sep="")
+  test_range <- c(floor(((fold-1)*test_vol)+1):floor(min(fold*test_vol, svm_items)))
+
+  # Leave out the end station labels.
+  svm_train <- svm_trips[-test_range, ]
+  svm_test <- svm_trips[test_range, ]
+  # Just the labels
+  svm_train_labels <- svm_trips$end_station_f[-test_range]
+  svm_test_labels <- svm_trips$end_station_f[test_range]
+
+  svm_model <- e1071::svm(
+    formula = end_station_f ~ ., 
+    data=svm_train, 
+    kernel=kernel_param, 
+    cost=c_param, coef0 = coef0_param, degree = degree_param,
+    scale=FALSE)
+  svm_pred <- stats::predict(svm_model, svm_test)
+  cm <- table(svm_pred, svm_test_labels)
+  print(cm)
+  result <- sum(diag(cm))/sum(cm)
+  cat("Result: ", result, "\n")
+  
+  svmresults[[fold]] <- cm
+  
+ # plot(rf_model)
+}
+
+# Dont destroy results if post-processing fails!
+svmresults_prime <- svmresults
+
+# Compute percent correct for each test/station
+for (test in 1:K_FOLDS){
+  percentages <- vector(mode = "numeric")
+  for (row in 1:16) {
+    temp <- svmresults[[test]]
+    percentages[row] <- 1-(temp[row, row]/sum(temp[row, ]))
+  }
+  svmresults_prime[[test]] <- cbind(svmresults[[test]], percentages)
+}
+
+svmall_error <- svmresults_prime[[1]][, 17]
+for (fold in 2:K_FOLDS) {
+  svmall_error <- rbind(svmall_error, svmresults_prime[[fold]][, 17])
+}
+svmerror_df_tmp <- reshape2::melt(svmall_error)
+
+# Provide proper names and remove the first unneeded column
+svmerror_df <- data.frame(
+  stationc = as.character(svmerror_df_tmp$Var2), 
+  stationf = factor(svmerror_df_tmp$Var2), 
+  error = svmerror_df_tmp$value) 
+intake_all <- unlist(
+  lapply(X = svmerror_df$stationc, FUN = function (x) stations$intake[stations$kioskId == x]))
+svmerror_df$intake <- intake_all
+
+g_svmerror <- ggplot(data = svmerror_df, mapping = aes(y = error, x = stationf, color = intake)) +
+  geom_boxplot() +
+  labs(
+    title= "Error Ranges for SVM Predicion of Destination Station",
+    subtitle = "Color represents intake volume of the station.",
+    x = "Station",
+    y = "Prediction Error",
+    color = "Station Intake Volume") +
+  scale_color_gradientn(colors = rev(rainbow(5)))
+g_svmerror
+
+
+
+```
+
+
+# NAIVE BAYES
+
+```{r run_nb}
+
+##-------------------------------------------------------------------------------------------------
+## EXECUTE NB ML PROCESSING
+
+# Set the random seed.
+set.seed(rseed)
+
+# Prepare a dataset
+nb_fields <- c("end_station_f", "start_time", "start_lat", "start_lon", "duration")
+#ndataset <- trips_16[, nb_fields]
+ndataset <- svm_trips
+
+# Create variables to hold output info for all folds.
+results <- list()
+ncm <- list()
+npercentages <- vector(mode = "numeric")
+
+# Define the length of a test set.
+test_length <- round(nrow(ndataset)/K_FOLDS)
+
+# Define which label is desired
+dataset_label_col <- "end_station_f"
+
+# Run K-folds testing
+for (i in 1:K_FOLDS) {
+  # Create the test set
+  test_range <- (((i-1) * test_length)+1):(i * test_length)
+  ntrain        <- ndataset[-test_range, 2:5]  
+  ntest         <- ndataset[test_range, 2:5]
+  ntrain_labels <- ndataset[-test_range, dataset_label_col]
+  ntest_labels  <- ndataset[test_range, dataset_label_col]
+
+  # Run machine learning model
+  nb <- e1071::naiveBayes(x = ntrain, y = ntrain_labels, laplace = NB_LAPLACE_PARAM)
+  nbpred <- predict(object = nb, newdata = ntest)
+
+  # Compute and record a confusion matrix
+  predres <- table(ntest_labels, nbpred)
+  results[[i]] <- predres
+
+  # Create a deeper confusion matrix to get precision and recall.
+  predcm <- caret::confusionMatrix(
+    data = nbpred, reference = ntest_labels, positive = "p", mode = "prec_recall")
+  ncm[[i]] <- predcm
+  pct <- predcm$overall[1]
+  npercentages <- c(npercentages, pct)
+}
+
+nbprec <- ncm[[1]]$byClass[, "Precision"]+0.005
+nbreca <- ncm[[1]]$byClass[, "Recall"]+0.005
+nb_df <- data.frame(
+  station = stri_sub(names(nbprec), from = -4, to = -1),
+  precision = nbprec,
+  recall = nbreca,
+  row.names = NULL
+)
+long_nb_df <- reshape2::melt(nb_df)
+g_nb <- ggplot(data = long_nb_df, mapping = aes(x = station, y = value, group = variable, fill = variable)) +
+  geom_col(position = "dodge", na.rm = TRUE) +
+  labs(
+    title = "Precision and Recall for Naive Bayes Cross Validation with Highest Accuracy",
+    x = "Station",
+    y = "Precision/Recall Value",
+    fill = "")
+g_nb
+```
+
+# TEXT MINING
+
+```{r text_mining}
+
+corp <- tm::SimpleCorpus(x = DirSource(directory = "faq"))
+dtm <- tm::DocumentTermMatrix(
+  x = corp, 
+  control = list(
+    removePunctuation = TRUE,
+    stripWhitespace = TRUE,
+    stopwords = TRUE,
+    removeNumbers = TRUE
+  ))
+iwords <- (sort(colSums(as.matrix(dtm)), decreasing = TRUE))
+wc_df <- data.frame(
+  word = names(iwords),
+  freq = iwords
+)
+
+wc <- wordcloud2::wordcloud2(data = wc_df[1:150, ], ellipticity = 0.75)
+wc
+
+```
+
